@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV /home/sparky/.openclaw/workspace/overnight-orchestrator/.venv
+set -gx VIRTUAL_ENV /home/sparky/.openclaw/workspace/Task_Guardian/.venv
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH

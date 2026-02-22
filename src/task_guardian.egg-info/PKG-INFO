@@ -3,4 +3,6 @@ Name: task-guardian
 Version: 0.1.0
 Summary: Safe, agent-friendly task scheduler + executor for OpenClaw stacks
 Requires-Python: >=3.10
+License-File: LICENSE
 Requires-Dist: croniter>=2.0.0
+Dynamic: license-file

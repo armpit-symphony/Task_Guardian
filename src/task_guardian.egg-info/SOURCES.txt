@@ -1,3 +1,5 @@
+LICENSE
+README.md
 pyproject.toml
 src/task_guardian.egg-info/PKG-INFO
 src/task_guardian.egg-info/SOURCES.txt
