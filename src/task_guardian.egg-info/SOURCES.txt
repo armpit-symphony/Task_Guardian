@@ -1,0 +1,7 @@
+pyproject.toml
+src/task_guardian.egg-info/PKG-INFO
+src/task_guardian.egg-info/SOURCES.txt
+src/task_guardian.egg-info/dependency_links.txt
+src/task_guardian.egg-info/entry_points.txt
+src/task_guardian.egg-info/requires.txt
+src/task_guardian.egg-info/top_level.txt
