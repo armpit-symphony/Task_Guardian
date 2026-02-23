@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/sparky/.openclaw/workspace/Task_Guardian
+source .venv/bin/activate
+export TG_FAIL_FAST=1
+export TG_MEMORY_DIR=/home/sparky/.openclaw/workspace/memory_guardian/data
+export TG_DATA_DIR=./data
+export TG_LOG_DIR=./logs
+
+# Ensure overnight marker exists; attach the tasks (idempotent)
+tg marker create --name overnight >/dev/null 2>&1 || true
+tg marker add-task --name overnight --task-id nightly-wrap >/dev/null 2>&1 || true
+tg marker add-task --name overnight --task-id overnight-plan >/dev/null 2>&1 || true
+tg marker add-task --name overnight --task-id overnight-check >/dev/null 2>&1 || true
+tg marker add-task --name overnight --task-id surprise-project >/dev/null 2>&1 || true
+
+# Run anything due in overnight now
+tg run-task --id overnight-plan || true
+
+tg run-task --id nightly-wrap || true
+
+tg run-task --id surprise-project || true
+
+echo "Goodnight bundle executed."
+echo "Plan:   data/overnight/PLAN-$(date -u +%F).md"
+echo "Report: data/overnight/REPORT-$(date -u +%F).md"

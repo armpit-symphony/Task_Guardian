@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/sparky/.openclaw/workspace/Task_Guardian
+source .venv/bin/activate
+export TG_FAIL_FAST=1
+export TG_MEMORY_DIR=/home/sparky/.openclaw/workspace/memory_guardian/data
+export TG_DATA_DIR=./data
+export TG_LOG_DIR=./logs
+
+# Ensure day marker exists; attach morning task (idempotent)
+tg marker create --name day >/dev/null 2>&1 || true
+tg marker add-task --name day --task-id morning-wrap >/dev/null 2>&1 || true
+
+# Run morning wrap now (it will run when due; use every:5 and wait a few sec if needed)
+tg run-task --id morning-wrap
+
+echo "Goodmorning bundle executed."
+echo "Overnight report: data/overnight/REPORT-$(date -u +%F).md"
