@@ -65,6 +65,27 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS idx_runs_task_id_started_at ON runs(task_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_next_run_at ON tasks(next_run_at);
+
+CREATE TABLE IF NOT EXISTS markers (
+  marker_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  closed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS marker_tasks (
+  marker_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  added_at TEXT NOT NULL,
+  PRIMARY KEY(marker_id, task_id),
+  FOREIGN KEY(marker_id) REFERENCES markers(marker_id),
+  FOREIGN KEY(task_id) REFERENCES tasks(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_marker_tasks_marker ON marker_tasks(marker_id);
+CREATE INDEX IF NOT EXISTS idx_marker_tasks_task ON marker_tasks(task_id);
+
 """
 
 class TaskStore:
@@ -169,4 +190,120 @@ class TaskStore:
     def runs_in_window(self, *, since_iso: str) -> list[RunRecord]:
         with self._conn() as c:
             rows = c.execute("SELECT * FROM runs WHERE started_at >= ? ORDER BY started_at DESC", (since_iso,)).fetchall()
-            return [RunRecord(**dict(r)) for r in rows]
+            return [RunRecord
+
+    # ---------- markers ----------
+    def create_marker(self, *, marker_id: str, name: str) -> None:
+        now = utc_now_iso()
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO markers (marker_id,name,status,created_at,closed_at) VALUES (?,?,?,?,?)",
+                (marker_id, name, "active", now, None),
+            )
+
+    def list_markers(self, *, limit: int = 50):
+        with self._conn() as c:
+            rows = c.execute("SELECT * FROM markers ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_marker(self, *, name: str):
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM markers WHERE name=?", (name,)).fetchone()
+            return dict(row) if row else None
+
+    def close_marker(self, *, name: str) -> None:
+        now = utc_now_iso()
+        with self._conn() as c:
+            c.execute("UPDATE markers SET status='closed', closed_at=? WHERE name=?", (now, name))
+
+    def add_task_to_marker(self, *, marker_name: str, task_id: str) -> None:
+        m = self.get_marker(name=marker_name)
+        if not m:
+            raise ValueError(f"Marker not found: {marker_name}")
+        now = utc_now_iso()
+        with self._conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO marker_tasks (marker_id,task_id,added_at) VALUES (?,?,?)",
+                (m["marker_id"], task_id, now),
+            )
+
+    def remove_task_from_marker(self, *, marker_name: str, task_id: str) -> None:
+        m = self.get_marker(name=marker_name)
+        if not m:
+            raise ValueError(f"Marker not found: {marker_name}")
+        with self._conn() as c:
+            c.execute("DELETE FROM marker_tasks WHERE marker_id=? AND task_id=?", (m["marker_id"], task_id))
+
+    def marker_tasks(self, *, marker_name: str):
+        m = self.get_marker(name=marker_name)
+        if not m:
+            raise ValueError(f"Marker not found: {marker_name}")
+        with self._conn() as c:
+            rows = c.execute("SELECT task_id FROM marker_tasks WHERE marker_id=? ORDER BY added_at ASC", (m["marker_id"],)).fetchall()
+            return [r["task_id"] for r in rows]
+
+    def due_tasks_for_marker(self, *, marker_name: str, now_iso: str, limit: int = 25):
+        m = self.get_marker(name=marker_name)
+        if not m or m["status"] != "active":
+            return []
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT t.* FROM tasks t
+                JOIN marker_tasks mt ON mt.task_id = t.id
+                WHERE mt.marker_id = ?
+                  AND t.enabled=1
+                  AND (t.next_run_at IS NULL OR t.next_run_at <= ?)
+                ORDER BY COALESCE(t.next_run_at, t.created_at) ASC
+                LIMIT ?
+                """,
+                (m["marker_id"], now_iso, limit),
+            ).fetchall()
+            return [Task(**dict(r)) for r in rows]
+
+    def due_tasks_active_markers_only(self, *, now_iso: str, limit: int = 25):
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT DISTINCT t.* FROM tasks t
+                JOIN marker_tasks mt ON mt.task_id = t.id
+                JOIN markers m ON m.marker_id = mt.marker_id
+                WHERE m.status='active'
+                  AND t.enabled=1
+                  AND (t.next_run_at IS NULL OR t.next_run_at <= ?)
+                ORDER BY COALESCE(t.next_run_at, t.created_at) ASC
+                LIMIT ?
+                """,
+                (now_iso, limit),
+            ).fetchall()
+            return [Task(**dict(r)) for r in rows]
+
+    def marker_status(self, *, marker_name: str):
+        m = self.get_marker(name=marker_name)
+        if not m:
+            raise ValueError(f"Marker not found: {marker_name}")
+        task_ids = self.marker_tasks(marker_name=marker_name)
+        ok_all = True
+        rows_out = []
+        with self._conn() as c:
+            for tid in task_ids:
+                r = c.execute(
+                    """
+                    SELECT * FROM runs
+                    WHERE task_id=? AND started_at >= ?
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """,
+                    (tid, m["created_at"]),
+                ).fetchone()
+                if not r:
+                    ok_all = False
+                    rows_out.append({"task_id": tid, "state": "missing"})
+                    continue
+                rr = dict(r)
+                if rr["status"] != "success":
+                    ok_all = False
+                rows_out.append({"task_id": tid, "state": rr["status"], "latest": {"started_at": rr["started_at"], "message": rr["message"]}})
+        return {"marker": m, "green": bool(ok_all) if task_ids else False, "tasks": rows_out}
+
+(**dict(r)) for r in rows]
