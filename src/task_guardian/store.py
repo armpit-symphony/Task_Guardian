@@ -329,3 +329,9 @@ class TaskStore:
                 "UPDATE markers SET created_at=?, status='active', closed_at=NULL WHERE name=?",
                 (now, name),
             )
+
+
+    def get_task_by_id(self, *, task_id: str):
+        with self._conn() as c:
+            row = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            return Task(**dict(row)) if row else None

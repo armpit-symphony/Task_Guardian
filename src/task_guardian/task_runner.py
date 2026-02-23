@@ -95,6 +95,15 @@ def run_task_once(*, cfg: TGConfig, store: TaskStore, task: Task, lane: str = "t
     return {"run_id": run_id, "task_id": task.id, "name": task.name, "status": status,
             "message": message, "output_path": str(output_path), "finished_at": finished_at, "next_run_at": nxt}
 
+
+def run_task_id(*, cfg: TGConfig, task_id: str) -> dict[str, Any]:
+    store = TaskStore(cfg.db_path)
+    t = store.get_task_by_id(task_id=task_id)
+    if not t:
+        return {"ok": False, "error": f"task not found: {task_id}"}
+    result = run_task_once(cfg=cfg, store=store, task=t)
+    return {"ok": True, "result": result}
+
 def run_due(*, cfg: TGConfig, limit: int = 25, marker_name: str | None = None, active_markers_only: bool = False) -> dict[str, Any]:
     store = TaskStore(cfg.db_path)
     now = utc_now_iso()
