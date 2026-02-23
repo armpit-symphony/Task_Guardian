@@ -68,7 +68,7 @@ def run_task_once(*, cfg: TGConfig, store: TaskStore, task: Task, lane: str = "t
         confidence_pre=0.7,
         perform_fn=perform,
         validate_fn=validate,
-        metadata={"run_id": run_id, "task_name": task.name},
+        metadata={"run_id": run_id, "task_name": task.name, "tg_lane": lane, "tg_agent": "task_guardian"},
     )
 
     tier, vmeta = validate(result)
