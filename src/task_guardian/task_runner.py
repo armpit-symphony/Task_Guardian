@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 from .config import TGConfig
@@ -94,10 +95,27 @@ def run_task_once(*, cfg: TGConfig, store: TaskStore, task: Task, lane: str = "t
     return {"run_id": run_id, "task_id": task.id, "name": task.name, "status": status,
             "message": message, "output_path": str(output_path), "finished_at": finished_at, "next_run_at": nxt}
 
-def run_due(*, cfg: TGConfig, limit: int = 25) -> dict[str, Any]:
+def run_due(*, cfg: TGConfig, limit: int = 25, marker_name: str | None = None, active_markers_only: bool = False) -> dict[str, Any]:
     store = TaskStore(cfg.db_path)
     now = utc_now_iso()
-    due = store.due_tasks(now_iso=now, limit=limit)
+    fail_fast = os.getenv('TG_FAIL_FAST','0') == '1'
+    if marker_name:
+        due = store.due_tasks_for_marker(marker_name=marker_name, now_iso=now, limit=limit)
+    elif active_markers_only:
+        if fail_fast:
+            # only run tasks in GREEN active markers
+            due = []
+            for m in store.list_markers(limit=200):
+                if m.get('status') != 'active':
+                    continue
+                st = store.marker_status(marker_name=m['name'])
+                if st.get('green'):
+                    due.extend(store.due_tasks_for_marker(marker_name=m['name'], now_iso=now, limit=limit))
+            due = due[:limit]
+        else:
+            due = store.due_tasks_active_markers_only(now_iso=now, limit=limit)
+    else:
+        due = store.due_tasks(now_iso=now, limit=limit)
 
     log_file = cfg.log_dir / "task_guardian.log"
     log_line(log_file, f"RUN_DUE: {len(due)} tasks due (limit={limit})")

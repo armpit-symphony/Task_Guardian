@@ -232,10 +232,100 @@ class TaskStore:
         m = self.get_marker(name=marker_name)
         if not m:
             raise ValueError(f"Marker not found: {marker_name}")
+
+        created_at = m["created_at"]
+
+        # tasks attached to marker
         with self._conn() as c:
-            rows = c.execute(
+            task_rows = c.execute(
                 "SELECT task_id FROM marker_tasks WHERE marker_id=? ORDER BY added_at ASC",
                 (m["marker_id"],),
             ).fetchall()
-        return {"marker": m, "tasks": [r["task_id"] for r in rows]}
+            task_ids = [r["task_id"] for r in task_rows]
 
+        # For each task: latest run since marker.created_at
+        ok_all = True
+        tasks = []
+        with self._conn() as c:
+            for tid in task_ids:
+                r = c.execute(
+                    """
+                    SELECT * FROM runs
+                    WHERE task_id=? AND started_at >= ?
+                    ORDER BY started_at DESC
+                    LIMIT 1
+                    """,
+                    (tid, created_at),
+                ).fetchone()
+
+                if not r:
+                    ok_all = False
+                    tasks.append({"task_id": tid, "state": "missing"})
+                    continue
+
+                rr = dict(r)
+                state = rr["status"]
+                if state != "success":
+                    ok_all = False
+
+                tasks.append({
+                    "task_id": tid,
+                    "state": state,
+                    "latest": {
+                        "started_at": rr["started_at"],
+                        "status": rr["status"],
+                        "message": rr["message"],
+                    }
+                })
+
+        green = bool(ok_all) if task_ids else False
+        return {"marker": m, "green": green, "tasks": tasks}
+
+
+
+
+    def due_tasks_for_marker(self, *, marker_name: str, now_iso: str, limit: int = 25):
+        m = self.get_marker(name=marker_name)
+        if not m or m.get("status") != "active":
+            return []
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT t.* FROM tasks t
+                JOIN marker_tasks mt ON mt.task_id = t.id
+                WHERE mt.marker_id = ?
+                  AND t.enabled=1
+                  AND (t.next_run_at IS NULL OR t.next_run_at <= ?)
+                ORDER BY COALESCE(t.next_run_at, t.created_at) ASC
+                LIMIT ?
+                """,
+                (m["marker_id"], now_iso, limit),
+            ).fetchall()
+            return [Task(**dict(r)) for r in rows]
+
+    def due_tasks_active_markers_only(self, *, now_iso: str, limit: int = 25):
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT DISTINCT t.* FROM tasks t
+                JOIN marker_tasks mt ON mt.task_id = t.id
+                JOIN markers m ON m.marker_id = mt.marker_id
+                WHERE m.status='active'
+                  AND t.enabled=1
+                  AND (t.next_run_at IS NULL OR t.next_run_at <= ?)
+                ORDER BY COALESCE(t.next_run_at, t.created_at) ASC
+                LIMIT ?
+                """,
+                (now_iso, limit),
+            ).fetchall()
+            return [Task(**dict(r)) for r in rows]
+
+
+
+    def reset_marker(self, *, name: str) -> None:
+        now = utc_now_iso()
+        with self._conn() as c:
+            c.execute(
+                "UPDATE markers SET created_at=?, status='active', closed_at=NULL WHERE name=?",
+                (now, name),
+            )
